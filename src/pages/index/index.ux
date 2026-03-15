@@ -1,0 +1,513 @@
+<template>
+  <div class="page">
+    <div class="top-wrap">
+      <text class="week-text">第{{ currentWeekText }}周</text>
+      <input class="choose-btn" type="button" value="{{ selectedDayText }}" onclick="openDayPicker" />
+    </div>
+
+    <scroll class="course-scroll" scroll-y="true" if="{{ !notStarted && hasCourses }}">
+      <block for="{{ displayCourses }}" tid="id">
+        <div class="course-item">
+          <div class="card">
+            <text class="name">{{ $item.name }}</text>
+            <text class="meta">{{ $item.timeText }}</text>
+            <text class="meta">{{ $item.position }}</text>
+          </div>
+        </div>
+      </block>
+    </scroll>
+
+    <div class="empty-wrap" if="{{ notStarted }}">
+      <text class="empty-text">暂未开学</text>
+    </div>
+
+    <div class="empty-wrap" if="{{ !notStarted && !hasCourses }}">
+      <text class="empty-text">今日无课程</text>
+    </div>
+
+    <div class="footer-wrap">
+      <div class="footer" onclick="openSettings">
+        <image class="setting-icon" src="/common/settings.png"></image>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import storage from "@system.storage"
+import interconnect from "@system.interconnect"
+import prompt from "@system.prompt"
+
+const STORAGE_KEY = "schedule_data"
+const conn = interconnect.instance()
+
+function createEmptySchedule() {
+  return {
+    courses: [],
+    timeSlots: [],
+    config: {
+      semesterStartDate: ""
+    }
+  }
+}
+
+function formatDate(date) {
+  const y = date.getFullYear()
+  const m = (date.getMonth() + 1 + "").padStart(2, "0")
+  const d = (date.getDate() + "").padStart(2, "0")
+  return y + "-" + m + "-" + d
+}
+
+function weekFromStart(startDate) {
+  if (!startDate) {
+    return 0
+  }
+  const start = new Date(startDate + "T00:00:00")
+  if (isNaN(start.getTime())) {
+    return 0
+  }
+  const now = new Date()
+  const today = new Date(formatDate(now) + "T00:00:00")
+  const diffDays = Math.floor((today.getTime() - start.getTime()) / 86400000)
+  if (diffDays < 0) {
+    return -1
+  }
+  return Math.floor(diffDays / 7) + 1
+}
+
+function maxWeekInCourses(courses) {
+  if (!Array.isArray(courses) || courses.length === 0) {
+    return 0
+  }
+  let max = 0
+  for (let i = 0; i < courses.length; i += 1) {
+    const weeks = courses[i].weeks
+    if (Array.isArray(weeks)) {
+      for (let j = 0; j < weeks.length; j += 1) {
+        if (weeks[j] > max) {
+          max = weeks[j]
+        }
+      }
+    }
+  }
+  return max
+}
+
+function normalizeDay(day) {
+  if (day < 1 || day > 7) {
+    return 1
+  }
+  return day
+}
+
+function dayText(day) {
+  return ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"][day] || "周一"
+}
+
+function dayOfWeekFromToday() {
+  const day = new Date().getDay()
+  if (day === 0) {
+    return 7
+  }
+  return day
+}
+
+function normalizeScheduleData(data) {
+  if (!data || typeof data !== "object") {
+    return createEmptySchedule()
+  }
+  const normalized = {
+    courses: Array.isArray(data.courses) ? data.courses : [],
+    timeSlots: Array.isArray(data.timeSlots) ? data.timeSlots : [],
+    config: data.config && typeof data.config === "object"
+      ? data.config
+      : {}
+  }
+  if (!normalized.config.semesterStartDate) {
+    normalized.config.semesterStartDate = ""
+  }
+  return normalized
+}
+
+function parseJsonIfNeeded(raw) {
+  if (typeof raw !== "string") {
+    return raw
+  }
+  return JSON.parse(raw)
+}
+
+function tryExtractSchedule(rawPayload) {
+  let payload = parseJsonIfNeeded(rawPayload)
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+
+  if (payload.scheduleData) {
+    payload = parseJsonIfNeeded(payload.scheduleData)
+  } else if (payload.data && !Array.isArray(payload.courses)) {
+    payload = parseJsonIfNeeded(payload.data)
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+
+  if (!Array.isArray(payload.courses) || !Array.isArray(payload.timeSlots)) {
+    return null
+  }
+
+  return payload
+}
+
+function sectionSortValue(course) {
+  if (course.startSection && course.startSection > 0) {
+    return course.startSection
+  }
+  if (course.customStartTime && /^\d{2}:\d{2}$/.test(course.customStartTime)) {
+    return parseInt(course.customStartTime.replace(":", ""), 10)
+  }
+  return 999
+}
+
+export default {
+  protected: {
+    fromPicker: "",
+    selectedDayParam: ""
+  },
+
+  private: {
+    scheduleData: createEmptySchedule(),
+    selectedDay: dayOfWeekFromToday(),
+    selectedDayText: dayText(dayOfWeekFromToday()),
+    displayCourses: [],
+    hasCourses: false,
+    notStarted: false,
+    currentWeek: 0,
+    currentWeekText: "-"
+  },
+
+  onInit() {
+    this.bindInterconnect()
+    const routedDay = this.readDayFromParams()
+    this.selectedDay = routedDay || dayOfWeekFromToday()
+    this.loadSchedule()
+  },
+
+  onDestroy() {
+    conn.onmessage = null
+  },
+
+  onShow() {
+    const routedDay = this.readDayFromParams()
+    if (routedDay) {
+      this.selectedDay = routedDay
+    }
+    this.loadSchedule()
+  },
+
+  readDayFromParams() {
+    const fromPicker = this.fromPicker === true || this.fromPicker === "true"
+    if (!fromPicker) {
+      return 0
+    }
+    const value = parseInt(this.selectedDayParam, 10)
+    this.fromPicker = ""
+    this.selectedDayParam = ""
+    return normalizeDay(value || dayOfWeekFromToday())
+  },
+
+  openDayPicker() {
+    router.push({
+      uri: "/pages/day-picker",
+      params: {
+        selectedDay: this.selectedDay
+      }
+    })
+  },
+
+  openSettings() {
+    router.push({
+      uri: "/pages/settings"
+    })
+  },
+
+  bindInterconnect() {
+    conn.onmessage = event => {
+      try {
+        const imported = tryExtractSchedule(event && event.data)
+        if (!imported) {
+          prompt.showToast({
+            message: "导入失败：配置格式不正确",
+            duration: 2000
+          })
+          return
+        }
+        this.scheduleData = normalizeScheduleData(imported)
+        storage.set({
+          key: STORAGE_KEY,
+          value: JSON.stringify(this.scheduleData),
+          success: () => {
+            prompt.showToast({
+              message: "导入成功",
+              duration: 1200
+            })
+          },
+          fail: () => {
+            prompt.showToast({
+              message: "导入失败：保存异常",
+              duration: 2000
+            })
+          }
+        })
+        this.afterLoad()
+      } catch (err) {
+        prompt.showToast({
+          message: "导入失败：" + err,
+          duration: 2000
+        })
+      }
+    }
+  },
+
+  loadSchedule() {
+    storage.get({
+      key: STORAGE_KEY,
+      success: raw => {
+        try {
+          const parsed = JSON.parse(raw)
+          this.scheduleData = normalizeScheduleData(parsed)
+          this.afterLoad()
+        } catch (err) {
+          this.useDefaultData()
+        }
+      },
+      fail: () => {
+        this.useDefaultData()
+      }
+    })
+  },
+
+  useDefaultData() {
+    const data = createEmptySchedule()
+    this.scheduleData = data
+    storage.set({
+      key: STORAGE_KEY,
+      value: JSON.stringify(data)
+    })
+    this.afterLoad()
+  },
+
+  afterLoad() {
+    const semesterStartDate = this.scheduleData && this.scheduleData.config && this.scheduleData.config.semesterStartDate
+    const hasSemesterStartDate = !!semesterStartDate
+    this.selectedDay = normalizeDay(this.selectedDay)
+    this.selectedDayText = dayText(this.selectedDay)
+    if (!hasSemesterStartDate) {
+      this.currentWeek = 0
+      this.currentWeekText = "-"
+      this.notStarted = false
+      this.displayCourses = []
+      this.hasCourses = false
+      return
+    }
+
+    this.currentWeek = weekFromStart(
+      this.scheduleData &&
+      this.scheduleData.config &&
+      this.scheduleData.config.semesterStartDate
+    )
+    const courses = (this.scheduleData && this.scheduleData.courses) || []
+    const maxWeek = maxWeekInCourses(courses)
+    if (this.currentWeek < 0) {
+      this.notStarted = true
+      this.currentWeekText = "-"
+    } else if (maxWeek > 0 && this.currentWeek > maxWeek) {
+      this.notStarted = true
+      this.currentWeekText = String(this.currentWeek)
+    } else {
+      this.notStarted = false
+      this.currentWeekText = this.currentWeek > 0 ? String(this.currentWeek) : "-"
+    }
+    this.refreshCourses()
+  },
+
+  findTime(number) {
+    const slots = (this.scheduleData && this.scheduleData.timeSlots) || []
+    for (let i = 0; i < slots.length; i += 1) {
+      if (slots[i].number === number) {
+        return slots[i]
+      }
+    }
+    return null
+  },
+
+  refreshCourses() {
+    const source = (this.scheduleData && this.scheduleData.courses) || []
+    const dayCourses = []
+    const currentWeekCourses = []
+    for (let i = 0; i < source.length; i += 1) {
+      const item = source[i]
+      if (item.day !== this.selectedDay) {
+        continue
+      }
+      const hasCustomTime = item.isCustomTime === true
+      const startSlot = this.findTime(item.startSection)
+      const endSlot = this.findTime(item.endSection)
+      let timeText = ""
+      if (hasCustomTime && item.customStartTime && item.customEndTime) {
+        timeText = item.customStartTime + "-" + item.customEndTime
+      } else if (startSlot && endSlot) {
+        timeText = startSlot.startTime + "-" + endSlot.endTime
+      }
+      const normalized = {
+        id: item.id,
+        name: item.name,
+        position: item.position || "",
+        startSection: item.startSection,
+        customStartTime: item.customStartTime || "",
+        timeText: timeText
+      }
+      dayCourses.push(normalized)
+
+      const hasWeekRule = item.weeks && item.weeks.length
+      if (!hasWeekRule || item.weeks.indexOf(this.currentWeek) >= 0) {
+        currentWeekCourses.push(normalized)
+      }
+    }
+
+    const target = this.currentWeek > 0
+      ? currentWeekCourses
+      : dayCourses
+
+    target.sort((a, b) => sectionSortValue(a) - sectionSortValue(b))
+    this.displayCourses = target
+    this.hasCourses = target.length > 0
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: #000000;
+  align-items: center;
+}
+
+.top-wrap {
+  flex-direction: column;
+  width: 100%;
+  padding-left: 16px;
+  padding-right: 16px;
+  padding-top: 20px;
+  padding-bottom: 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+.week-text {
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.choose-btn {
+  width: 58%;
+  height: 42px;
+  margin-top: 10px;
+  border-radius: 20px;
+  border-width: 2px;
+  border-color: #3b3b3b;
+  background-color: #0c0c0c;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.course-scroll {
+  flex: 1;
+  width: 100%;
+  flex-direction: column;
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 12px;
+  padding-bottom: 8px;
+}
+
+.course-item {
+  flex-direction: column;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.card {
+  flex-direction: column;
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border-width: 2px;
+  border-color: #3b3b3b;
+  background-color: #090909;
+}
+
+.name {
+  color: #ffffff;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.meta {
+  margin-top: 4px;
+  color: #cccccc;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.empty-wrap {
+  flex: 1;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.footer-wrap {
+  flex-direction: column;
+  width: 100%;
+  align-items: center;
+}
+
+.empty-text {
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.footer {
+  width: 30%;
+  height: 52px;
+  margin-top: 14px;
+  margin-bottom: 12px;
+  border-radius: 20px;
+  border-width: 2px;
+  border-color: #3b3b3b;
+  background-color: #111111;
+  align-items: center;
+  justify-content: center;
+}
+
+.setting-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.setting-text {
+  margin-left: 8px;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 700;
+}
+</style>

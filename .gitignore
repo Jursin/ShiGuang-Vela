@@ -1,0 +1,9 @@
+/.nyc_output
+/coverage
+/node_modules
+/sign
+/dist
+/build
+.husky/
+
+.github/skills

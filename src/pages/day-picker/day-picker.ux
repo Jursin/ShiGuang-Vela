@@ -1,0 +1,115 @@
+<template>
+  <div class="page">
+    <div class="day-list">
+      <input class="day-btn" type="button" value="周一" onclick="pickMon" />
+      <input class="day-btn" type="button" value="周二" onclick="pickTue" />
+      <input class="day-btn" type="button" value="周三" onclick="pickWed" />
+      <input class="day-btn" type="button" value="周四" onclick="pickThu" />
+      <input class="day-btn" type="button" value="周五" onclick="pickFri" />
+      <input class="day-btn" type="button" value="周六" onclick="pickSat" />
+      <input class="day-btn" type="button" value="周日" onclick="pickSun" />
+    </div>
+
+    <input class="back-btn" type="button" value="返回" onclick="back" />
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+
+export default {
+  pickMon() {
+    this.pick(1)
+  },
+
+  pickTue() {
+    this.pick(2)
+  },
+
+  pickWed() {
+    this.pick(3)
+  },
+
+  pickThu() {
+    this.pick(4)
+  },
+
+  pickFri() {
+    this.pick(5)
+  },
+
+  pickSat() {
+    this.pick(6)
+  },
+
+  pickSun() {
+    this.pick(7)
+  },
+
+  pick(day) {
+    router.replace({
+      uri: "/pages/index",
+      params: {
+        fromPicker: true,
+        selectedDayParam: String(day)
+      }
+    })
+  },
+
+  back() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 14px;
+  background-color: #000000;
+  align-items: center;
+}
+
+.day-list {
+  flex-direction: column;
+  align-items: center;
+  margin-top: 14px;
+  width: 100%;
+}
+
+.day-btn {
+  width: 58%;
+  height: 42px;
+  margin-bottom: 10px;
+  border-radius: 20px;
+  border-width: 2px;
+  border-color: #3b3b3b;
+  background-color: #0c0c0c;
+  color: #ffffff;
+  font-size: 24px;
+  text-align: center;
+  padding-left: 8px;
+  padding-right: 8px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.back-btn {
+  width: 58%;
+  height: 42px;
+  margin-top: 6px;
+  border-radius: 20px;
+  border-width: 2px;
+  border-color: #3b3b3b;
+  background-color: #111111;
+  color: #ffffff;
+  font-size: 24px;
+  text-align: center;
+  padding-left: 8px;
+  padding-right: 8px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+</style>
