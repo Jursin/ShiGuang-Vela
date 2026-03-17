@@ -1,33 +1,38 @@
 <template>
   <div class="page">
-    <div class="top-wrap">
+    <div class="header-wrap">
       <text class="week-text">第{{ currentWeekText }}周</text>
-      <input class="choose-btn" type="button" value="{{ selectedDayText }}" onclick="openDayPicker" />
+      <div class="date-row">
+        <text class="day-text">{{ selectedDayText }}</text>
+        <text class="date-text">{{ selectedDateText }}</text>
+      </div>
     </div>
 
-    <scroll class="course-scroll" scroll-y="true" if="{{ !notStarted && hasCourses }}">
-      <block for="{{ displayCourses }}" tid="id">
-        <div class="course-item">
-          <div class="card">
-            <text class="name">{{ $item.name }}</text>
-            <text class="meta">{{ $item.timeText }}</text>
-            <text class="meta">{{ $item.position }}</text>
+    <div class="course-content" ontouchstart="onContentTouchStart" ontouchend="onContentTouchEnd">
+      <scroll class="course-list-scroll" scroll-y="true" if="{{ !notStarted && hasCourses }}">
+        <block for="{{ displayCourses }}" tid="id">
+          <div class="course-row">
+            <div class="course-card">
+              <text class="course-name">{{ $item.name }}</text>
+              <text class="course-meta">{{ $item.timeText }}</text>
+              <text class="course-meta">{{ $item.position }}</text>
+            </div>
           </div>
-        </div>
-      </block>
-    </scroll>
+        </block>
+      </scroll>
 
-    <div class="empty-wrap" if="{{ notStarted }}">
-      <text class="empty-text">暂未开学</text>
+      <div class="state-wrap" if="{{ notStarted }}">
+        <text class="empty-text">暂未开学</text>
+      </div>
+
+      <div class="state-wrap" if="{{ !notStarted && !hasCourses }}">
+        <text class="empty-text">今日无课程</text>
+      </div>
     </div>
 
-    <div class="empty-wrap" if="{{ !notStarted && !hasCourses }}">
-      <text class="empty-text">今日无课程</text>
-    </div>
-
-    <div class="footer-wrap">
-      <div class="footer" onclick="openSettings">
-        <image class="setting-icon" src="/common/settings.png"></image>
+    <div class="action-wrap">
+      <div class="settings-button" onclick="openSettings">
+        <image class="settings-icon" src="/common/more.png"></image>
       </div>
     </div>
   </div>
@@ -41,6 +46,12 @@ import prompt from "@system.prompt"
 
 const STORAGE_KEY = "schedule_data"
 const conn = interconnect.instance()
+const DAY_SLIDE_TOTAL = 361
+const DAY_SLIDE_CENTER = Math.floor(DAY_SLIDE_TOTAL / 2)
+const SWIPE_MIN_DISTANCE = 42
+const SWIPE_HORIZONTAL_FACTOR = 1.2
+const RIGHT_SWIPE_MIN_DISTANCE = 56
+const EDGE_BACK_GUARD = 42
 
 function createEmptySchedule() {
   return {
@@ -59,7 +70,7 @@ function formatDate(date) {
   return y + "-" + m + "-" + d
 }
 
-function weekFromStart(startDate) {
+function weekFromStart(startDate, targetDate) {
   if (!startDate) {
     return 0
   }
@@ -67,9 +78,9 @@ function weekFromStart(startDate) {
   if (isNaN(start.getTime())) {
     return 0
   }
-  const now = new Date()
-  const today = new Date(formatDate(now) + "T00:00:00")
-  const diffDays = Math.floor((today.getTime() - start.getTime()) / 86400000)
+  const base = targetDate instanceof Date ? targetDate : new Date()
+  const target = new Date(formatDate(base) + "T00:00:00")
+  const diffDays = Math.floor((target.getTime() - start.getTime()) / 86400000)
   if (diffDays < 0) {
     return -1
   }
@@ -111,6 +122,38 @@ function dayOfWeekFromToday() {
     return 7
   }
   return day
+}
+
+function addDays(date, offsetDays) {
+  const next = new Date(formatDate(date) + "T00:00:00")
+  next.setDate(next.getDate() + offsetDays)
+  return next
+}
+
+function dayOfWeekFromDate(date) {
+  const day = date.getDay()
+  if (day === 0) {
+    return 7
+  }
+  return day
+}
+
+function formatMonthDay(date) {
+  const m = (date.getMonth() + 1 + "").padStart(2, "0")
+  const d = (date.getDate() + "").padStart(2, "0")
+  return m + "-" + d
+}
+
+function getTouchPoint(event) {
+  const changed = event && event.changedTouches
+  if (changed && changed.length > 0) {
+    return changed[0]
+  }
+  const touches = event && event.touches
+  if (touches && touches.length > 0) {
+    return touches[0]
+  }
+  return null
 }
 
 function normalizeScheduleData(data) {
@@ -171,15 +214,16 @@ function sectionSortValue(course) {
 }
 
 export default {
-  protected: {
-    fromPicker: "",
-    selectedDayParam: ""
-  },
-
   private: {
     scheduleData: createEmptySchedule(),
     selectedDay: dayOfWeekFromToday(),
     selectedDayText: dayText(dayOfWeekFromToday()),
+    selectedDateText: formatMonthDay(new Date()),
+    selectedDateKey: formatDate(new Date()),
+    selectedOffsetDays: 0,
+    daySlideIndex: DAY_SLIDE_CENTER,
+    touchStartX: -1,
+    touchStartY: -1,
     displayCourses: [],
     hasCourses: false,
     notStarted: false,
@@ -189,8 +233,7 @@ export default {
 
   onInit() {
     this.bindInterconnect()
-    const routedDay = this.readDayFromParams()
-    this.selectedDay = routedDay || dayOfWeekFromToday()
+    this.initDaySlides()
     this.loadSchedule()
   },
 
@@ -199,31 +242,81 @@ export default {
   },
 
   onShow() {
-    const routedDay = this.readDayFromParams()
-    if (routedDay) {
-      this.selectedDay = routedDay
-    }
     this.loadSchedule()
   },
 
-  readDayFromParams() {
-    const fromPicker = this.fromPicker === true || this.fromPicker === "true"
-    if (!fromPicker) {
-      return 0
-    }
-    const value = parseInt(this.selectedDayParam, 10)
-    this.fromPicker = ""
-    this.selectedDayParam = ""
-    return normalizeDay(value || dayOfWeekFromToday())
+  initDaySlides() {
+    this.applyDaySlideIndex(DAY_SLIDE_CENTER, true)
   },
 
-  openDayPicker() {
-    router.push({
-      uri: "/pages/day-picker",
-      params: {
-        selectedDay: this.selectedDay
-      }
-    })
+  applyDaySlideIndex(index) {
+    let nextIndex = index
+    if (nextIndex < 0) {
+      nextIndex = 0
+    }
+    if (nextIndex >= DAY_SLIDE_TOTAL) {
+      nextIndex = DAY_SLIDE_TOTAL - 1
+    }
+
+    this.daySlideIndex = nextIndex
+    const offset = nextIndex - DAY_SLIDE_CENTER
+    const selectedDate = addDays(new Date(), offset)
+    this.selectedOffsetDays = offset
+    this.selectedDateKey = formatDate(selectedDate)
+    this.selectedDateText = formatMonthDay(selectedDate)
+    this.selectedDay = dayOfWeekFromDate(selectedDate)
+    this.selectedDayText = dayText(this.selectedDay)
+
+    this.afterLoad()
+  },
+
+  onContentTouchStart(event) {
+    const point = getTouchPoint(event)
+    if (!point) {
+      this.touchStartX = -1
+      this.touchStartY = -1
+      return
+    }
+    this.touchStartX = point.clientX
+    this.touchStartY = point.clientY
+  },
+
+  onContentTouchEnd(event) {
+    if (this.touchStartX < 0 || this.touchStartY < 0) {
+      return
+    }
+
+    const point = getTouchPoint(event)
+    const startX = this.touchStartX
+    const startY = this.touchStartY
+    this.touchStartX = -1
+    this.touchStartY = -1
+
+    if (!point) {
+      return
+    }
+
+    const deltaX = point.clientX - startX
+    const deltaY = point.clientY - startY
+    const absDeltaX = Math.abs(deltaX)
+    const absDeltaY = Math.abs(deltaY)
+    if (absDeltaX < SWIPE_MIN_DISTANCE) {
+      return
+    }
+
+    if (absDeltaX <= absDeltaY * SWIPE_HORIZONTAL_FACTOR) {
+      return
+    }
+
+    // 左侧边缘保留给系统返回手势，避免与页面右滑切换冲突。
+    if (deltaX > 0 && (startX <= EDGE_BACK_GUARD || absDeltaX < RIGHT_SWIPE_MIN_DISTANCE)) {
+      return
+    }
+
+    const nextIndex = deltaX < 0
+      ? this.daySlideIndex + 1
+      : this.daySlideIndex - 1
+    this.applyDaySlideIndex(nextIndex, true)
   },
 
   openSettings() {
@@ -302,6 +395,10 @@ export default {
     const semesterStartDate = this.scheduleData && this.scheduleData.config && this.scheduleData.config.semesterStartDate
     const hasSemesterStartDate = !!semesterStartDate
     this.selectedDay = normalizeDay(this.selectedDay)
+    const selectedDate = addDays(new Date(), this.selectedOffsetDays || 0)
+    this.selectedDateKey = formatDate(selectedDate)
+    this.selectedDateText = formatMonthDay(selectedDate)
+    this.selectedDay = dayOfWeekFromDate(selectedDate)
     this.selectedDayText = dayText(this.selectedDay)
     if (!hasSemesterStartDate) {
       this.currentWeek = 0
@@ -315,7 +412,8 @@ export default {
     this.currentWeek = weekFromStart(
       this.scheduleData &&
       this.scheduleData.config &&
-      this.scheduleData.config.semesterStartDate
+      this.scheduleData.config.semesterStartDate,
+      selectedDate
     )
     const courses = (this.scheduleData && this.scheduleData.courses) || []
     const maxWeek = maxWeekInCourses(courses)
@@ -396,38 +494,43 @@ export default {
   align-items: center;
 }
 
-.top-wrap {
+.header-wrap {
   flex-direction: column;
   width: 100%;
-  padding-left: 16px;
-  padding-right: 16px;
-  padding-top: 20px;
-  padding-bottom: 12px;
+  padding-top: 18px;
+  padding-bottom: 6px;
   align-items: center;
   justify-content: center;
 }
 
 .week-text {
   color: #ffffff;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 800;
 }
 
-.choose-btn {
-  width: 58%;
-  height: 42px;
-  margin-top: 10px;
-  border-radius: 20px;
-  border-width: 2px;
-  border-color: #3b3b3b;
-  background-color: #0c0c0c;
-  color: #ffffff;
-  font-size: 24px;
-  font-weight: 700;
-  text-align: center;
+.date-row {
+  flex-direction: row;
+  width: 100%;
+  margin-top: 6px;
+  align-items: center;
+  justify-content: center;
 }
 
-.course-scroll {
+.day-text {
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.date-text {
+  margin-left: 10px;
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.course-list-scroll {
   flex: 1;
   width: 100%;
   flex-direction: column;
@@ -437,13 +540,19 @@ export default {
   padding-bottom: 8px;
 }
 
-.course-item {
+.course-content {
+  flex: 1;
+  width: 100%;
+  flex-direction: column;
+}
+
+.course-row {
   flex-direction: column;
   width: 100%;
   margin-bottom: 10px;
 }
 
-.card {
+.course-card {
   flex-direction: column;
   width: 100%;
   padding: 14px;
@@ -453,20 +562,20 @@ export default {
   background-color: #090909;
 }
 
-.name {
+.course-name {
   color: #ffffff;
   font-size: 26px;
   font-weight: 700;
 }
 
-.meta {
+.course-meta {
   margin-top: 4px;
   color: #cccccc;
   font-size: 22px;
   font-weight: 700;
 }
 
-.empty-wrap {
+.state-wrap {
   flex: 1;
   width: 100%;
   flex-direction: column;
@@ -474,7 +583,7 @@ export default {
   justify-content: center;
 }
 
-.footer-wrap {
+.action-wrap {
   flex-direction: column;
   width: 100%;
   align-items: center;
@@ -486,12 +595,12 @@ export default {
   font-weight: 700;
 }
 
-.footer {
-  width: 30%;
+.settings-button {
+  width: 50%;
   height: 52px;
-  margin-top: 14px;
-  margin-bottom: 12px;
-  border-radius: 20px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  border-radius: 30px;
   border-width: 2px;
   border-color: #3b3b3b;
   background-color: #111111;
@@ -499,15 +608,8 @@ export default {
   justify-content: center;
 }
 
-.setting-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.setting-text {
-  margin-left: 8px;
-  color: #ffffff;
-  font-size: 24px;
-  font-weight: 700;
+.settings-icon {
+  width: 40px;
+  height: 40px;
 }
 </style>
