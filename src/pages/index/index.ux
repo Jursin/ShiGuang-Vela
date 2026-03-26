@@ -20,16 +20,61 @@
 
     <div class="course-content">
       <scroll class="course-list-scroll" scroll-y="true" if="{{ !notStarted && hasCourses }}">
-        <block for="{{ displayCourses }}" tid="id">
-          <div class="course-row">
-            <div class="{{ $item.isOngoing ? 'course-card course-card-ongoing' : 'course-card' }}" onclick="openCourseDetail($item)">
-              <text class="course-name">{{ $item.name }}</text>
-              <text class="course-meta">{{ $item.timeText }}</text>
-              <text class="course-meta">{{ $item.position }}</text>
-              <text class="course-meta" if="{{ showTeacher && $item.teacher }}">{{ $item.teacher }}</text>
-              <progress class="course-progress" if="{{ $item.isOngoing }}" percent="{{ $item.progressPercent }}" type="horizontal"></progress>
+        <block if="{{ morningCourses.length > 0 }}">
+          <text class="section-title">上午</text>
+          <block for="{{ morningCourses }}" tid="id">
+            <div class="course-row">
+              <div class="{{ $item.isOngoing ? 'course-card course-card-ongoing' : 'course-card' }}" onclick="openCourseDetail($item)">
+                <text class="course-name">{{ $item.name }}</text>
+                <text class="course-meta">{{ $item.timeText }}</text>
+                <text class="course-meta">{{ $item.position }}</text>
+                <text class="course-meta" if="{{ showTeacher && $item.teacher }}">{{ $item.teacher }}</text>
+                <progress class="course-progress" if="{{ $item.isOngoing }}" percent="{{ $item.progressPercent }}" type="horizontal"></progress>
+              </div>
             </div>
-          </div>
+          </block>
+        </block>
+        <block if="{{ noonCourses.length > 0 }}">
+          <text class="section-title">中午</text>
+          <block for="{{ noonCourses }}" tid="id">
+            <div class="course-row">
+              <div class="{{ $item.isOngoing ? 'course-card course-card-ongoing' : 'course-card' }}" onclick="openCourseDetail($item)">
+                <text class="course-name">{{ $item.name }}</text>
+                <text class="course-meta">{{ $item.timeText }}</text>
+                <text class="course-meta">{{ $item.position }}</text>
+                <text class="course-meta" if="{{ showTeacher && $item.teacher }}">{{ $item.teacher }}</text>
+                <progress class="course-progress" if="{{ $item.isOngoing }}" percent="{{ $item.progressPercent }}" type="horizontal"></progress>
+              </div>
+            </div>
+          </block>
+        </block>
+        <block if="{{ afternoonCourses.length > 0 }}">
+          <text class="section-title">下午</text>
+          <block for="{{ afternoonCourses }}" tid="id">
+            <div class="course-row">
+              <div class="{{ $item.isOngoing ? 'course-card course-card-ongoing' : 'course-card' }}" onclick="openCourseDetail($item)">
+                <text class="course-name">{{ $item.name }}</text>
+                <text class="course-meta">{{ $item.timeText }}</text>
+                <text class="course-meta">{{ $item.position }}</text>
+                <text class="course-meta" if="{{ showTeacher && $item.teacher }}">{{ $item.teacher }}</text>
+                <progress class="course-progress" if="{{ $item.isOngoing }}" percent="{{ $item.progressPercent }}" type="horizontal"></progress>
+              </div>
+            </div>
+          </block>
+        </block>
+        <block if="{{ eveningCourses.length > 0 }}">
+          <text class="section-title">晚上</text>
+          <block for="{{ eveningCourses }}" tid="id">
+            <div class="course-row">
+              <div class="{{ $item.isOngoing ? 'course-card course-card-ongoing' : 'course-card' }}" onclick="openCourseDetail($item)">
+                <text class="course-name">{{ $item.name }}</text>
+                <text class="course-meta">{{ $item.timeText }}</text>
+                <text class="course-meta">{{ $item.position }}</text>
+                <text class="course-meta" if="{{ showTeacher && $item.teacher }}">{{ $item.teacher }}</text>
+                <progress class="course-progress" if="{{ $item.isOngoing }}" percent="{{ $item.progressPercent }}" type="horizontal"></progress>
+              </div>
+            </div>
+          </block>
         </block>
       </scroll>
 
@@ -201,13 +246,24 @@ function tryExtractSchedule(rawPayload) {
   return payload
 }
 
+// 按实际开始时间排序
 function sectionSortValue(course) {
-  if (course.startSection && course.startSection > 0) {
-    return course.startSection
-  }
+  // 优先用自定义开始时间
   if (course.customStartTime && /^\d{2}:\d{2}$/.test(course.customStartTime)) {
-    return parseInt(course.customStartTime.replace(":", ""), 10)
+    const [h, m] = course.customStartTime.split(":").map(Number)
+    return h * 60 + m
   }
+  // 其次用标准课节时间
+  if (course.startSection && course.startSection > 0 && course.timeText && course.timeText.indexOf("-") > 0) {
+    // 取 timeText 的开始时间
+    const startTime = course.timeText.split("-")[0]
+    if (/^\d{2}:\d{2}$/.test(startTime)) {
+      const [h, m] = startTime.split(":").map(Number)
+      return h * 60 + m
+    }
+    return course.startSection * 60 // 兜底
+  }
+  // 兜底
   return 999
 }
 
@@ -305,7 +361,11 @@ export default {
     notStarted: false,
     showTeacher: true,
     currentWeek: 0,
-    currentWeekText: "-"
+    currentWeekText: "-",
+    morningCourses: [],
+    noonCourses: [],
+    afternoonCourses: [],
+    eveningCourses: []
   },
 
   onInit() {
@@ -523,6 +583,31 @@ export default {
     target.sort((a, b) => sectionSortValue(a) - sectionSortValue(b))
     this.displayCourses = target
     this.hasCourses = target.length > 0
+
+    // 课程分组：仅按结束时间分组
+    this.morningCourses = []
+    this.noonCourses = []
+    this.afternoonCourses = []
+    this.eveningCourses = []
+    for (let i = 0; i < target.length; i++) {
+      const course = target[i]
+      // 解析结束时间
+      let endTime = ""
+      if (course.timeText && course.timeText.indexOf("-") > 0) {
+        endTime = course.timeText.split("-")[1]
+      }
+      const [endHour, endMinute] = endTime ? endTime.split(":").map(Number) : [0, 0]
+      const endMinutes = endHour * 60 + endMinute
+      if (endMinutes < 12 * 60) {
+        this.morningCourses.push(course)
+      } else if (endMinutes <= 14 * 60) {
+        this.noonCourses.push(course)
+      } else if (endMinutes <= 19 * 60) {
+        this.afternoonCourses.push(course)
+      } else {
+        this.eveningCourses.push(course)
+      }
+    }
   },
 
   openCourseDetail(course) {
@@ -604,6 +689,13 @@ export default {
   width: 100%;
   flex-direction: column;
   padding: 10px;
+}
+
+.section-title {
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 700;
+  padding-bottom: 8px;
 }
 
 .course-content {

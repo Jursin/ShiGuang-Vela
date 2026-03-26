@@ -30,6 +30,7 @@
 import router from "@system.router"
 import storage from "@system.storage"
 import prompt from "@system.prompt"
+import vibrator from "@system.vibrator"
 
 const STORAGE_KEY = "schedule_data"
 
@@ -160,6 +161,10 @@ export default {
       success: () => {
         this.semesterStartDate = ""
         this.clearConfirming = false
+        // 清除成功后震动一次
+        try {
+          vibrator.vibrate({ mode: "short" })
+        } catch (e) {}
         prompt.showToast({
           message: "已清除配置",
           duration: 1200
