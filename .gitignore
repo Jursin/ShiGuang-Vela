@@ -8,3 +8,5 @@
 
 .github/skills
 .trae/skills
+
+src/common/example-schedule.js

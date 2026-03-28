@@ -99,6 +99,9 @@ import storage from "@system.storage"
 import interconnect from "@system.interconnect"
 import prompt from "@system.prompt"
 
+// 示例课表数据（开发/调试用）
+// const exampleSchedule = require("../../common/example-schedule.js")
+
 const STORAGE_KEY = "schedule_data"
 const conn = interconnect.instance()
 const DAY_SLIDE_TOTAL = 361
@@ -460,21 +463,27 @@ export default {
   },
 
   loadSchedule() {
-    storage.get({
-      key: STORAGE_KEY,
-      success: raw => {
-        try {
-          const parsed = JSON.parse(raw)
-          this.scheduleData = normalizeScheduleData(parsed)
-          this.afterLoad()
-        } catch (err) {
+    // 优先直接使用 exampleSchedule，若报错则回退到正式存储
+    try {
+      this.scheduleData = normalizeScheduleData(exampleSchedule)
+      this.afterLoad()
+    } catch (e) {
+      storage.get({
+        key: STORAGE_KEY,
+        success: raw => {
+          try {
+            const parsed = JSON.parse(raw)
+            this.scheduleData = normalizeScheduleData(parsed)
+            this.afterLoad()
+          } catch (err) {
+            this.useDefaultData()
+          }
+        },
+        fail: () => {
           this.useDefaultData()
         }
-      },
-      fail: () => {
-        this.useDefaultData()
-      }
-    })
+      })
+    }
   },
 
   useDefaultData() {
@@ -765,7 +774,7 @@ export default {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 10px;
+  bottom: 20px;
   z-index: 10;
   width: 58%;
   height: 62px;

@@ -369,7 +369,7 @@ export default {
 .confirm-button {
   width: 56%;
   height: 62px;
-  margin-bottom: 10px;
+  margin-bottom: 20px;
   border-radius: 30px;
   background-color: #287eff;
   align-items: center;
