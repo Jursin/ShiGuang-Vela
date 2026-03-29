@@ -12,10 +12,6 @@
           <text class="item-arrow">&gt;</text>
         </div>
       </list-item>
-      <list-item type="default" class="settings-item settings-item-switch">
-        <text class="item-text">显示教师</text>
-        <switch class="item-switch" checked="{{ showTeacher }}" onchange="onShowTeacherChange"></switch>
-      </list-item>
       <list-item type="default" class="settings-item settings-item-warn" onclick="clearSchedule">
         <text class="item-text item-text-warn">{{ clearConfirming ? '确认清除' : '清除配置' }}</text>
       </list-item>
