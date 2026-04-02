@@ -86,17 +86,32 @@ export default {
     const timeParts = timeText.split("-")
     if (timeParts.length !== 2) return
     
+    const startTime = timeParts[0]
     const endTime = timeParts[1]
+    const [startHour, startMinute] = startTime.split(":").map(Number)
     const [endHour, endMinute] = endTime.split(":").map(Number)
     
     const now = new Date()
-    const currentHour = now.getHours()
-    const currentMinute = now.getMinutes()
+    const totalStartSeconds = (startHour * 60 + startMinute) * 60
+    const totalEndSeconds = (endHour * 60 + endMinute) * 60
+    const totalCurrentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()
     
-    const totalEndMinutes = endHour * 60 + endMinute
-    const totalCurrentMinutes = currentHour * 60 + currentMinute
-    
-    this.remainingMinutes = Math.max(0, totalEndMinutes - totalCurrentMinutes)
+    const remainingSeconds = totalEndSeconds - totalCurrentSeconds
+    if (remainingSeconds <= 0) {
+      this.remainingMinutes = 0
+      this.course.isOngoing = false
+      this.course.progressPercent = 100
+      return
+    }
+
+    this.remainingMinutes = Math.ceil(remainingSeconds / 60)
+    const durationSeconds = totalEndSeconds - totalStartSeconds
+    if (durationSeconds > 0) {
+      let percent = Math.floor(((totalCurrentSeconds - totalStartSeconds) * 100) / durationSeconds)
+      if (percent < 0) percent = 0
+      if (percent > 100) percent = 100
+      this.course.progressPercent = percent
+    }
   },
 
   // 上课提醒和进度条
