@@ -1,6 +1,13 @@
 <template>
   <div class="page">
-    <text class="title">关于</text>
+    <text class="title title-round">关于</text>
+    <div class="title-row title-rect">
+      <div class="title-left">
+        <text class="title-back" onclick="goBack">&lt;</text>
+        <text class="title-text">关于</text>
+      </div>
+      <text class="title-text">{{ currentTime }}</text>
+    </div>
     <image class="app-icon" src="{{ appInfo.icon }}"></image>
     <text class="app-name">{{ appInfo.name }}</text>
     <text class="app-meta">版本名称：{{ appInfo.versionName }}</text>
@@ -11,6 +18,15 @@
 
 <script>
 import app from '@system.app'
+import router from '@system.router'
+
+function formatTime(date) {
+  const hour = date.getHours()
+  const minute = date.getMinutes()
+  const hh = hour < 10 ? '0' + hour : hour + ''
+  const mm = minute < 10 ? '0' + minute : minute + ''
+  return hh + ':' + mm
+}
 
 export default {
   private: {
@@ -19,10 +35,14 @@ export default {
       name: '',
       versionName: '',
       versionCode: ''
-    }
+    },
+    currentTime: '',
+    timerId: 0
   },
 
   onInit() {
+    this.refreshTime()
+    this.startClock()
     const info = app.getInfo()
     if (info) {
       this.appInfo = {
@@ -31,6 +51,32 @@ export default {
         versionName: info.versionName || '',
         versionCode: info.versionCode || ''
       }
+    }
+  },
+
+  onDestroy() {
+    this.stopClock()
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  refreshTime() {
+    this.currentTime = formatTime(new Date())
+  },
+
+  startClock() {
+    this.stopClock()
+    this.timerId = setInterval(() => {
+      this.refreshTime()
+    }, 30000)
+  },
+
+  stopClock() {
+    if (this.timerId) {
+      clearInterval(this.timerId)
+      this.timerId = 0
     }
   }
 }
@@ -51,6 +97,33 @@ export default {
   font-size: 26px;
   font-weight: 800;
   margin-bottom: 30px;
+}
+
+.title-rect {
+  display: none;
+}
+
+.title-row {
+  width: 100%;
+  padding: 0 18px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title-left {
+  flex-direction: row;
+  align-items: center;
+}
+
+.title-back {
+  margin-right: 12px;
+}
+
+.title-back, .title-text {
+  color: #ffffff;
+  font-size: 30px;
+  font-weight: 800;
 }
 
 .app-icon {
@@ -76,13 +149,18 @@ export default {
 }
 
 @media (shape: rect) {
+  .title-round {
+    display: none;
+  }
+
+  .title-rect {
+    display: flex;
+    margin-bottom: 16px;
+  }
+
   .app-icon {
     width: 120px;
     height: 120px;
-  }
-
-  .title {
-    font-size: 30px;
   }
 
   .app-name {

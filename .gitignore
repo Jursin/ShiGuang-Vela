@@ -10,4 +10,4 @@
 .trae/skills
 AGENTS.md
 
-src/common/example-schedule.js
+src/common/example-schedule*.js
